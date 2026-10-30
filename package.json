@@ -1,0 +1,69 @@
+{
+  "capabilities": ["health"],
+  "name": "igiwatchalarm",
+  "author": "iginoc",
+  "version": "1.0.0",
+  "keywords": [
+    "pebble-app"
+  ],
+  "private": true,
+  "dependencies": {
+    "pebble-fctx": "^1.6.4",
+    "pebble-clay": "^1.0.4"
+  },
+  "pebble": {
+    "displayName": "igiwatchalarm",
+    "uuid": "59c556fc-d474-11f1-863b-a8934a908d17",
+    "sdkVersion": "3",
+    "enableMultiJS": true,
+    "targetPlatforms": [
+      "aplite",
+      "basalt",
+      "chalk",
+      "diorite",
+      "emery"
+    ],
+    "watchapp": {
+      "watchface": true,
+      "iconImage": "MENU_ICON"
+    },
+    "messageKeys": [
+      "BackgroundColor",
+      "TextColor",
+      "FontChoice",
+      "ScreenOrientation",
+      "DateLanguage"
+    ],
+    "resources": {
+      "media": [
+        {
+          "type": "bitmap",
+          "name": "MENU_ICON",
+          "file": "images/igiwatch.png",
+          "menuIcon": true
+        },
+        {
+          "type": "raw",
+          "name": "AVENIR_NEXT_DEMI_BOLD",
+          "file": "fonts/AvenirNextDemiBold.ffont"
+        },
+        {
+          "type": "raw",
+          "name": "LECO1976_REGULAR",
+          "file": "fonts/LECO1976-Regular.ffont"
+        },
+        {
+          "type": "raw",
+          "name": "AVENIR_NEXT_REGULAR",
+          "file": "fonts/AvenirNextRegular.ffont"
+        }
+      ]
+    }
+  },
+  "devDependencies": {
+    "pebble-fctx-compiler": "^1.2.0"
+  },
+  "overrides": {
+    "xml2js": "^0.5.0"
+  }
+}

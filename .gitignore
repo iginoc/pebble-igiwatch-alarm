@@ -1,0 +1,6 @@
+build/
+node_modules/
+.wafpickle-*
+*.pyc
+.DS_Store
+.lock-waf_*
