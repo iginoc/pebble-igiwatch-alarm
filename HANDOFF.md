@@ -11,7 +11,7 @@
 - **Smart Alarm System**:
   - Configurable from the Pebble mobile app settings via Clay framework (`AlarmActive`, `AlarmTime`).
   - Schedules wakeups with Pebble OS `wakeup_schedule()` so alarms fire whether the app is open or closed.
-  - Pulsing vibration pattern repeated every 2 seconds.
+  - Cadence vibration: a distinct "tic" pulse every second, automatically stopping after 15 seconds if unhandled.
   - Dedicated alarm UI: Displays current time at the top, a large ringing alarm clock graphic (`ALARM_LARGE`) in the center, and dismissal hint at the bottom.
   - Interactive dismissal: Pressing any physical button (UP, SELECT, DOWN, BACK) or tapping/shaking the watch immediately stops the alarm.
   - Auto-timeout: Automatically silences after 15 seconds if not dismissed manually.
@@ -84,7 +84,8 @@ In `package.json`:
    - `wakeup_service_subscribe()`: Receives wakeup callbacks if the app is already open.
    - `APP_LAUNCH_WAKEUP`: Detects if the app was launched by a scheduled wakeup event when closed and triggers the alarm immediately.
 4. **Trigger & Vibration**:
-   - `trigger_alarm()` sets `s_alarm_ringing = true`, triggers `s_alarm_vibe_pattern`, reschedules the vibration pulse every 2 seconds via `s_alarm_vibe_timer`, and registers a 15-second auto-stop timer via `s_alarm_timeout_timer`.
+   - `trigger_alarm()` sets `s_alarm_ringing = true`, resets `s_alarm_second_count = 0`, triggers an immediate 80ms "tic" vibration pulse (`s_alarm_tic_pattern`), and schedules repeating ticks every 1000ms via `s_alarm_vibe_timer`.
+   - On each second elapsed, `alarm_vibe_timer_callback()` emits another "tic". If `s_alarm_second_count >= 15` (15 seconds elapsed), it automatically calls `stop_alarm()`.
 5. **UI Rendering (`layer_update_proc`)**:
    - When `s_alarm_ringing` is true, the canvas switches to the alarm screen:
      - Top: Current time in `FONT_KEY_BITHAM_34_MEDIUM_NUMBERS`.

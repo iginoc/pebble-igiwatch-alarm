@@ -11,7 +11,7 @@ A dynamic and feature-rich smartwatch application for Pebble smartwatches that c
 - **Integrated Smart Alarm**:
   - Configure alarm activation and target time directly from the Pebble mobile app settings (Clay).
   - Background scheduling via the **Pebble Wakeup API** (fires even if the app was closed).
-  - Rhythmic pulsing vibration pattern during alarm.
+  - Rhythmic **"tic" vibration pulse every second** (up to a maximum of 15 seconds).
   - Dedicated alarm screen displaying the current time at the top, a large ringing alarm clock graphic in the center, and a dismissal hint at the bottom.
   - Dismiss immediately with **any physical button** (UP, SELECT, DOWN, BACK) or by tapping/shaking the watch.
   - **15-Second Auto-Stop**: Automatically stops vibrating and returns to the normal watch screen if no button is pressed within 15 seconds.

@@ -205,13 +205,13 @@ static void schedule_alarm_wakeup(void) {
   }
 }
 
-static const uint32_t s_alarm_vibe_segments[] = {
-  350, 150, 350, 150, 350, 150, 500
+// Segmenti vibrazione per un "tic" breve e netto (80 ms)
+static const uint32_t s_alarm_tic_segments[] = { 80 };
+static const VibePattern s_alarm_tic_pattern = {
+  .durations = (uint32_t *)s_alarm_tic_segments,
+  .num_segments = ARRAY_LENGTH(s_alarm_tic_segments),
 };
-static const VibePattern s_alarm_vibe_pattern = {
-  .durations = (uint32_t *)s_alarm_vibe_segments,
-  .num_segments = ARRAY_LENGTH(s_alarm_vibe_segments),
-};
+static int s_alarm_second_count = 0;
 
 static void stop_alarm(void) {
   if (s_alarm_vibe_timer) {
@@ -222,6 +222,7 @@ static void stop_alarm(void) {
     app_timer_cancel(s_alarm_timeout_timer);
     s_alarm_timeout_timer = NULL;
   }
+  s_alarm_second_count = 0;
   vibes_cancel();
 
   if (s_alarm_ringing) {
@@ -237,26 +238,31 @@ static void stop_alarm(void) {
   }
 }
 
-static void alarm_timeout_callback(void *data) {
-  s_alarm_timeout_timer = NULL;
-  APP_LOG(APP_LOG_LEVEL_INFO, "15 secondi trascorsi: sveglia silenziata automaticamente.");
-  stop_alarm();
-}
-
 static void alarm_vibe_timer_callback(void *data) {
   s_alarm_vibe_timer = NULL;
-  if (s_alarm_ringing) {
-    vibes_enqueue_custom_pattern(s_alarm_vibe_pattern);
-    s_alarm_vibe_timer = app_timer_register(2000, alarm_vibe_timer_callback, NULL);
+  if (!s_alarm_ringing) {
+    return;
   }
+
+  s_alarm_second_count++;
+  if (s_alarm_second_count >= 15) {
+    APP_LOG(APP_LOG_LEVEL_INFO, "15 secondi trascorsi: sveglia silenziata automaticamente.");
+    stop_alarm();
+    return;
+  }
+
+  // Emette un tic per ogni secondo trascorso
+  vibes_enqueue_custom_pattern(s_alarm_tic_pattern);
+  s_alarm_vibe_timer = app_timer_register(1000, alarm_vibe_timer_callback, NULL);
 }
 
 static void trigger_alarm(void) {
   if (s_alarm_ringing) {
     return;
   }
-  APP_LOG(APP_LOG_LEVEL_INFO, "SVEGLIA ATTIVATA! Mostro ora e immagine, vibrazione avviata (max 15s).");
+  APP_LOG(APP_LOG_LEVEL_INFO, "SVEGLIA ATTIVATA! Mostro ora e immagine, vibrazione: un tic al secondo (max 15s).");
   s_alarm_ringing = true;
+  s_alarm_second_count = 0;
 
   if (s_canvas_layer) {
     layer_mark_dirty(s_canvas_layer);
@@ -265,12 +271,11 @@ static void trigger_alarm(void) {
     layer_mark_dirty(s_status_layer);
   }
 
-  // Vibrazione immediata e ripetizione ogni 2 secondi
-  vibes_enqueue_custom_pattern(s_alarm_vibe_pattern);
-  s_alarm_vibe_timer = app_timer_register(2000, alarm_vibe_timer_callback, NULL);
+  // Primo tic immediato
+  vibes_enqueue_custom_pattern(s_alarm_tic_pattern);
 
-  // Auto-stop dopo 15 secondi esatti se non premuto alcun tasto
-  s_alarm_timeout_timer = app_timer_register(15000, alarm_timeout_callback, NULL);
+  // Pianifica il tic successivo ogni secondo (1000 ms) fino a un massimo di 15 secondi
+  s_alarm_vibe_timer = app_timer_register(1000, alarm_vibe_timer_callback, NULL);
 }
 
 static void wakeup_handler(WakeupId id, int32_t cookie) {
