@@ -19,17 +19,24 @@ static int s_font_choice;
 static int s_orientation_choice;
 static char s_date_locale[8];
 
-// Alarm state
-static bool s_alarm_active = false;
-static char s_alarm_time[8] = "07:00";
-static int s_alarm_hour = 7;
-static int s_alarm_min = 0;
-static bool s_alarm_triggered_this_minute = false;
+// Alarm state (supporto fino a 3 sveglie con selezione giorni)
+#define NUM_ALARMS 3
+
+typedef struct {
+  bool active;
+  char time_str[8];
+  int hour;
+  int min;
+  uint8_t days_mask; // Bit 0 = Dom, Bit 1 = Lun, ..., Bit 6 = Sab (0-127)
+  bool triggered_this_minute;
+} AlarmConfig;
+
+static AlarmConfig s_alarms[NUM_ALARMS];
 static bool s_alarm_ringing = false;
 static AppTimer *s_alarm_vibe_timer = NULL;
 static AppTimer *s_alarm_timeout_timer = NULL;
 static GBitmap *s_alarm_bitmap = NULL;
-static WakeupId s_alarm_wakeup_id = -1;
+static WakeupId s_alarm_wakeup_ids[NUM_ALARMS] = {-1, -1, -1};
 
 static AppTimer *s_fluid_rotation_timer;
 static AppTimer *s_double_tap_timer = NULL;
@@ -146,9 +153,9 @@ static bool tuple_get_bool(Tuple *t) {
   return false;
 }
 
-static void parse_alarm_time(const char *time_str) {
-  s_alarm_hour = -1;
-  s_alarm_min = -1;
+static void parse_alarm_time_struct(const char *time_str, int *out_h, int *out_m) {
+  *out_h = -1;
+  *out_m = -1;
   if (!time_str) {
     return;
   }
@@ -169,39 +176,73 @@ static void parse_alarm_time(const char *time_str) {
       h = 0;
     }
     if (h >= 0 && h < 24 && m >= 0 && m < 60) {
-      s_alarm_hour = h;
-      s_alarm_min = m;
+      *out_h = h;
+      *out_m = m;
     }
   }
-  APP_LOG(APP_LOG_LEVEL_INFO, "Orario sveglia analizzato: %02d:%02d", s_alarm_hour, s_alarm_min);
 }
 
-static void schedule_alarm_wakeup(void) {
-  wakeup_cancel_all();
-  s_alarm_wakeup_id = -1;
+static bool is_any_alarm_active(void) {
+  for (int i = 0; i < NUM_ALARMS; i++) {
+    if (s_alarms[i].active && s_alarms[i].hour >= 0 && s_alarms[i].min >= 0 && s_alarms[i].days_mask > 0) {
+      return true;
+    }
+  }
+  return false;
+}
 
-  if (!s_alarm_active || s_alarm_hour < 0 || s_alarm_min < 0) {
-    return;
+static void schedule_alarm_wakeups(void) {
+  wakeup_cancel_all();
+  for (int i = 0; i < NUM_ALARMS; i++) {
+    s_alarm_wakeup_ids[i] = -1;
   }
 
   time_t now = time(NULL);
-  struct tm *t = localtime(&now);
+  struct tm *now_tm = localtime(&now);
 
-  struct tm alarm_tm = *t;
-  alarm_tm.tm_hour = s_alarm_hour;
-  alarm_tm.tm_min = s_alarm_min;
-  alarm_tm.tm_sec = 0;
+  for (int i = 0; i < NUM_ALARMS; i++) {
+    if (!s_alarms[i].active || s_alarms[i].hour < 0 || s_alarms[i].min < 0 || s_alarms[i].days_mask == 0) {
+      continue;
+    }
 
-  time_t alarm_time = mktime(&alarm_tm);
-  if (alarm_time <= now) {
-    alarm_time += 86400; // Programma per il giorno successivo
-  }
+    int current_wday = now_tm->tm_wday; // 0 = Domenica, 1 = Lunedì, ...
+    int days_ahead = -1;
 
-  s_alarm_wakeup_id = wakeup_schedule(alarm_time, 0, false);
-  if (s_alarm_wakeup_id < 0) {
-    APP_LOG(APP_LOG_LEVEL_WARNING, "Errore programmazione wakeup: %ld", (long)s_alarm_wakeup_id);
-  } else {
-    APP_LOG(APP_LOG_LEVEL_INFO, "Wakeup programmato con successo per timestamp: %ld (ID: %ld)", (long)alarm_time, (long)s_alarm_wakeup_id);
+    for (int offset = 0; offset < 7; offset++) {
+      int check_wday = (current_wday + offset) % 7;
+      if (s_alarms[i].days_mask & (1 << check_wday)) {
+        if (offset == 0) {
+          struct tm today_target = *now_tm;
+          today_target.tm_hour = s_alarms[i].hour;
+          today_target.tm_min = s_alarms[i].min;
+          today_target.tm_sec = 0;
+          time_t t_target = mktime(&today_target);
+          if (t_target > now + 2) {
+            days_ahead = 0;
+            break;
+          }
+        } else {
+          days_ahead = offset;
+          break;
+        }
+      }
+    }
+
+    if (days_ahead >= 0) {
+      struct tm target_tm = *now_tm;
+      target_tm.tm_hour = s_alarms[i].hour;
+      target_tm.tm_min = s_alarms[i].min;
+      target_tm.tm_sec = 0;
+      time_t target_time = mktime(&target_tm) + (days_ahead * 86400);
+
+      s_alarm_wakeup_ids[i] = wakeup_schedule(target_time, i, false);
+      if (s_alarm_wakeup_ids[i] < 0) {
+        APP_LOG(APP_LOG_LEVEL_WARNING, "Errore wakeup sveglia %d: %ld", i + 1, (long)s_alarm_wakeup_ids[i]);
+      } else {
+        APP_LOG(APP_LOG_LEVEL_INFO, "Wakeup sveglia %d programmata per timestamp %ld (+%d gg, ID: %ld)", 
+                i + 1, (long)target_time, days_ahead, (long)s_alarm_wakeup_ids[i]);
+      }
+    }
   }
 }
 
@@ -234,7 +275,7 @@ static void stop_alarm(void) {
     if (s_status_layer) {
       layer_mark_dirty(s_status_layer);
     }
-    schedule_alarm_wakeup();
+    schedule_alarm_wakeups();
   }
 }
 
@@ -309,14 +350,21 @@ static void prv_click_config_provider(void *context) {
 static void tick_handler(struct tm *tick_time, TimeUnits units_changed) {
   update_time();
 
-  if (s_alarm_active && s_alarm_hour >= 0 && s_alarm_min >= 0) {
-    if (tick_time->tm_hour == s_alarm_hour && tick_time->tm_min == s_alarm_min) {
-      if (!s_alarm_triggered_this_minute) {
-        s_alarm_triggered_this_minute = true;
-        trigger_alarm();
+  for (int i = 0; i < NUM_ALARMS; i++) {
+    if (s_alarms[i].active && s_alarms[i].hour >= 0 && s_alarms[i].min >= 0) {
+      uint8_t today_bit = (1 << tick_time->tm_wday);
+      if (s_alarms[i].days_mask & today_bit) {
+        if (tick_time->tm_hour == s_alarms[i].hour && tick_time->tm_min == s_alarms[i].min) {
+          if (!s_alarms[i].triggered_this_minute) {
+            s_alarms[i].triggered_this_minute = true;
+            trigger_alarm();
+          }
+        } else {
+          s_alarms[i].triggered_this_minute = false;
+        }
+      } else {
+        s_alarms[i].triggered_this_minute = false;
       }
-    } else {
-      s_alarm_triggered_this_minute = false;
     }
   }
 }
@@ -487,10 +535,17 @@ static void layer_update_proc(Layer *layer, GContext *ctx) {
     graphics_draw_text(ctx, label_today, label_font, GRect(0, center.y + 26, bounds.size.w, 34), 
                        GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
 
-    char alarm_info[32];
-    if (s_alarm_active && s_alarm_hour >= 0 && s_alarm_min >= 0) {
-      snprintf(alarm_info, sizeof(alarm_info), "Sveglia: %02d:%02d", s_alarm_hour, s_alarm_min);
-    } else {
+    char alarm_info[40];
+    bool alarm_found = false;
+    for (int i = 0; i < NUM_ALARMS; i++) {
+      if (s_alarms[i].active && s_alarms[i].hour >= 0 && s_alarms[i].min >= 0 && s_alarms[i].days_mask) {
+        snprintf(alarm_info, sizeof(alarm_info), "Sveglia %d: %02d:%02d",
+                 i + 1, s_alarms[i].hour, s_alarms[i].min);
+        alarm_found = true;
+        break;
+      }
+    }
+    if (!alarm_found) {
       snprintf(alarm_info, sizeof(alarm_info), "Sveglia: OFF");
     }
     GFont info_font = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
@@ -679,7 +734,7 @@ static void status_update_proc(Layer *layer, GContext *ctx) {
 
   }
 
-  if (s_alarm_active) {
+  if (is_any_alarm_active()) {
     GPoint clock_center;
     if (s_current_angle == TRIG_MAX_ANGLE * 3 / 4) { // Landscape Sinistro
       clock_center = GPoint(battery_rect.origin.x - 14, battery_rect.origin.y + battery_rect.size.h / 2);
@@ -769,24 +824,44 @@ static void inbox_received_handler(DictionaryIterator *iter, void *context) {
     update_time();
   }
 
-  Tuple *alarm_active_t = dict_find(iter, MESSAGE_KEY_AlarmActive);
-  if (alarm_active_t) {
-    s_alarm_active = tuple_get_bool(alarm_active_t);
-    persist_write_bool(MESSAGE_KEY_AlarmActive, s_alarm_active);
-    APP_LOG(APP_LOG_LEVEL_INFO, "Ricevuto AlarmActive: %d (len=%d)", s_alarm_active, (int)alarm_active_t->length);
+  const uint32_t active_keys[NUM_ALARMS] = {
+    MESSAGE_KEY_Alarm1Active, MESSAGE_KEY_Alarm2Active, MESSAGE_KEY_Alarm3Active
+  };
+  const uint32_t time_keys[NUM_ALARMS] = {
+    MESSAGE_KEY_Alarm1Time, MESSAGE_KEY_Alarm2Time, MESSAGE_KEY_Alarm3Time
+  };
+  const uint32_t days_keys[NUM_ALARMS] = {
+    MESSAGE_KEY_Alarm1Days, MESSAGE_KEY_Alarm2Days, MESSAGE_KEY_Alarm3Days
+  };
+  bool alarms_changed = false;
+  for (int i = 0; i < NUM_ALARMS; i++) {
+    Tuple *active_t = dict_find(iter, active_keys[i]);
+    if (active_t) {
+      s_alarms[i].active = tuple_get_bool(active_t);
+      persist_write_bool(active_keys[i], s_alarms[i].active);
+      alarms_changed = true;
+    }
+
+    Tuple *alarm_time_tuple = dict_find(iter, time_keys[i]);
+    if (alarm_time_tuple) {
+      strncpy(s_alarms[i].time_str, alarm_time_tuple->value->cstring, sizeof(s_alarms[i].time_str) - 1);
+      s_alarms[i].time_str[sizeof(s_alarms[i].time_str) - 1] = '\0';
+      parse_alarm_time_struct(s_alarms[i].time_str, &s_alarms[i].hour, &s_alarms[i].min);
+      persist_write_string(time_keys[i], s_alarms[i].time_str);
+      alarms_changed = true;
+    }
+
+    Tuple *days_t = dict_find(iter, days_keys[i]);
+    if (days_t) {
+      uint32_t days_mask = days_t->value->uint32;
+      s_alarms[i].days_mask = days_mask & 0x7f;
+      persist_write_int(days_keys[i], s_alarms[i].days_mask);
+      alarms_changed = true;
+    }
   }
 
-  Tuple *alarm_time_t = dict_find(iter, MESSAGE_KEY_AlarmTime);
-  if (alarm_time_t) {
-    strncpy(s_alarm_time, alarm_time_t->value->cstring, sizeof(s_alarm_time) - 1);
-    s_alarm_time[sizeof(s_alarm_time) - 1] = '\0';
-    persist_write_string(MESSAGE_KEY_AlarmTime, s_alarm_time);
-    parse_alarm_time(s_alarm_time);
-    APP_LOG(APP_LOG_LEVEL_INFO, "Ricevuto AlarmTime: %s", s_alarm_time);
-  }
-
-  if (alarm_active_t || alarm_time_t) {
-    schedule_alarm_wakeup();
+  if (alarms_changed) {
+    schedule_alarm_wakeups();
     vibes_short_pulse();
     layer_mark_dirty(s_status_layer);
   }
@@ -906,20 +981,41 @@ static void init(void) {
     strcpy(s_date_locale, "it_IT");
   }
 
-  // Load alarm settings or set defaults
-  if (persist_exists(MESSAGE_KEY_AlarmActive)) {
-    s_alarm_active = persist_read_bool(MESSAGE_KEY_AlarmActive);
-  } else {
-    s_alarm_active = false;
+  const uint32_t active_keys[NUM_ALARMS] = {
+    MESSAGE_KEY_Alarm1Active, MESSAGE_KEY_Alarm2Active, MESSAGE_KEY_Alarm3Active
+  };
+  const uint32_t time_keys[NUM_ALARMS] = {
+    MESSAGE_KEY_Alarm1Time, MESSAGE_KEY_Alarm2Time, MESSAGE_KEY_Alarm3Time
+  };
+  const uint32_t days_keys[NUM_ALARMS] = {
+    MESSAGE_KEY_Alarm1Days, MESSAGE_KEY_Alarm2Days, MESSAGE_KEY_Alarm3Days
+  };
+  static const char *default_alarm_times[NUM_ALARMS] = {"07:00", "08:00", "09:00"};
+  for (int i = 0; i < NUM_ALARMS; i++) {
+    s_alarms[i].active = persist_exists(active_keys[i]) && persist_read_bool(active_keys[i]);
+    if (persist_exists(time_keys[i])) {
+      persist_read_string(time_keys[i], s_alarms[i].time_str, sizeof(s_alarms[i].time_str));
+    } else {
+      strncpy(s_alarms[i].time_str, default_alarm_times[i], sizeof(s_alarms[i].time_str));
+    }
+    parse_alarm_time_struct(s_alarms[i].time_str, &s_alarms[i].hour, &s_alarms[i].min);
+    s_alarms[i].days_mask = persist_exists(days_keys[i]) ? persist_read_int(days_keys[i]) & 0x7f : 0x7f;
+    s_alarms[i].triggered_this_minute = false;
   }
 
-  if (persist_exists(MESSAGE_KEY_AlarmTime)) {
-    persist_read_string(MESSAGE_KEY_AlarmTime, s_alarm_time, sizeof(s_alarm_time));
-  } else {
-    strcpy(s_alarm_time, "07:00");
+  // Migrate the previous single-alarm settings once, if no new alarm was saved yet.
+  if (!persist_exists(MESSAGE_KEY_Alarm1Active) && persist_exists(MESSAGE_KEY_AlarmActive)) {
+    s_alarms[0].active = persist_read_bool(MESSAGE_KEY_AlarmActive);
+    if (persist_exists(MESSAGE_KEY_AlarmTime)) {
+      persist_read_string(MESSAGE_KEY_AlarmTime, s_alarms[0].time_str, sizeof(s_alarms[0].time_str));
+      parse_alarm_time_struct(s_alarms[0].time_str, &s_alarms[0].hour, &s_alarms[0].min);
+    }
+    s_alarms[0].days_mask = 0x7f;
+    persist_write_bool(MESSAGE_KEY_Alarm1Active, s_alarms[0].active);
+    persist_write_string(MESSAGE_KEY_Alarm1Time, s_alarms[0].time_str);
+    persist_write_int(MESSAGE_KEY_Alarm1Days, s_alarms[0].days_mask);
   }
-  parse_alarm_time(s_alarm_time);
-  schedule_alarm_wakeup();
+  schedule_alarm_wakeups();
 
   if (s_orientation_choice == 1) { // Portrait
     s_current_angle = TRIG_MAX_ANGLE / 2;

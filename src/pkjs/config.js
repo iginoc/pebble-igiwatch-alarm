@@ -91,27 +91,96 @@ module.exports = [
     "items": [
       {
         "type": "heading",
-        "defaultValue": "Alarm"
+        "defaultValue": "Sveglia 1"
       },
       {
         "type": "toggle",
-        "messageKey": "AlarmActive",
-        "label": "Enable Alarm",
+        "messageKey": "Alarm1Active",
+        "label": "Abilita Sveglia 1",
         "defaultValue": false
       },
       {
         "type": "input",
-        "messageKey": "AlarmTime",
+        "messageKey": "Alarm1Time",
         "defaultValue": "07:00",
-        "label": "Alarm Time",
+        "label": "Orario Sveglia 1",
         "attributes": {
           "type": "time"
         }
+      },
+      {
+        "type": "checkboxgroup",
+        "messageKey": "Alarm1Days",
+        "label": "Giorni attivi",
+        "defaultValue": [true, true, true, true, true, false, false],
+        "options": ["Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom"]
+      }
+    ]
+  },
+  {
+    "type": "section",
+    "items": [
+      {
+        "type": "heading",
+        "defaultValue": "Sveglia 2"
+      },
+      {
+        "type": "toggle",
+        "messageKey": "Alarm2Active",
+        "label": "Abilita Sveglia 2",
+        "defaultValue": false
+      },
+      {
+        "type": "input",
+        "messageKey": "Alarm2Time",
+        "defaultValue": "08:00",
+        "label": "Orario Sveglia 2",
+        "attributes": {
+          "type": "time"
+        }
+      },
+      {
+        "type": "checkboxgroup",
+        "messageKey": "Alarm2Days",
+        "label": "Giorni attivi",
+        "defaultValue": [true, true, true, true, true, true, true],
+        "options": ["Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom"]
+      }
+    ]
+  },
+  {
+    "type": "section",
+    "items": [
+      {
+        "type": "heading",
+        "defaultValue": "Sveglia 3"
+      },
+      {
+        "type": "toggle",
+        "messageKey": "Alarm3Active",
+        "label": "Abilita Sveglia 3",
+        "defaultValue": false
+      },
+      {
+        "type": "input",
+        "messageKey": "Alarm3Time",
+        "defaultValue": "09:00",
+        "label": "Orario Sveglia 3",
+        "attributes": {
+          "type": "time"
+        }
+      },
+      {
+        "type": "checkboxgroup",
+        "messageKey": "Alarm3Days",
+        "label": "Giorni attivi",
+        "defaultValue": [false, false, false, false, false, true, true],
+        "options": ["Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom"]
       }
     ]
   },
   {
     "type": "submit",
-    "defaultValue": "Save"
+    "defaultValue": "Salva Impostazioni"
   }
 ];

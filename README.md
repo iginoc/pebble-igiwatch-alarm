@@ -9,8 +9,8 @@ A dynamic and feature-rich smartwatch application for Pebble smartwatches that c
 ## Features
 
 - **Integrated Smart Alarm**:
-  - Configure alarm activation and target time directly from the Pebble mobile app settings (Clay).
-  - Background scheduling via the **Pebble Wakeup API** (fires even if the app was closed).
+  - Configure up to **three independent alarms**, each with its own enable switch, time, and selected days of the week in the Pebble mobile app settings (Clay).
+  - Background scheduling via the **Pebble Wakeup API** (fires even if the app was closed), with the next occurrence scheduled separately for each active alarm.
   - Rhythmic **"tic" vibration pulse every second** (up to a maximum of 15 seconds).
   - Dedicated alarm screen displaying the current time at the top, a large ringing alarm clock graphic in the center, and a dismissal hint at the bottom.
   - Dismiss immediately with **any physical button** (UP, SELECT, DOWN, BACK) or by tapping/shaking the watch.
@@ -26,7 +26,7 @@ A dynamic and feature-rich smartwatch application for Pebble smartwatches that c
 - **Status Indicators**:
   - Color-coded battery level meter.
   - Bluetooth disconnection warning and icon.
-  - Active alarm indicator.
+  - Active alarm indicator; the steps glance shows the first active alarm time.
 
 ---
 
@@ -38,7 +38,7 @@ A dynamic and feature-rich smartwatch application for Pebble smartwatches that c
 - **Exit App**: Press the **BACK** button when the alarm is not ringing to return to the Pebble launcher.
 
 ### Alarm Mode
-1. **Set the Alarm**: Open the Pebble mobile app on your smartphone, navigate to the settings of **IgiWatchAlarm**, toggle **Enable Alarm**, and choose your desired time.
+1. **Set Alarms**: Open the Pebble mobile app on your smartphone and navigate to the settings of **IgiWatchAlarm**. For each of the three slots, enable the alarm, choose its time, and select the days on which it should ring. An alarm with no days selected will not ring.
 2. **When the Alarm Rings**:
    - The watch vibrates with a repeating pattern.
    - The screen shows the current time in large numbers at the top and a large ringing alarm illustration in the center.
@@ -76,4 +76,4 @@ pebble install --emulator basalt
 pebble screenshot --no-open screenshot.png
 ```
 
-For complete technical and architectural details, refer to [HANDOFF.md](file:///home/igino/pebble/igiwatchalarm/HANDOFF.md).
+For complete technical and architectural details, refer to [HANDOFF.md](HANDOFF.md).

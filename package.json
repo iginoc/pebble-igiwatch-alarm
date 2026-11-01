@@ -2,7 +2,7 @@
   "capabilities": ["health"],
   "name": "igiwatchalarm",
   "author": "iginoc",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "keywords": [
     "pebble-app"
   ],
@@ -34,7 +34,16 @@
       "ScreenOrientation",
       "DateLanguage",
       "AlarmActive",
-      "AlarmTime"
+      "AlarmTime",
+      "Alarm1Active",
+      "Alarm1Time",
+      "Alarm1Days",
+      "Alarm2Active",
+      "Alarm2Time",
+      "Alarm2Days",
+      "Alarm3Active",
+      "Alarm3Time",
+      "Alarm3Days"
     ],
     "resources": {
       "media": [

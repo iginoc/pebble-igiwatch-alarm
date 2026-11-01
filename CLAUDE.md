@@ -14,7 +14,6 @@ The app targets multiple Pebble watch models:
 - chalk (Pebble Time Round)
 - diorite (Pebble 2)
 - emery (Pebble Time 2)
-- flint (Pebble 2 Duo)
 
 ## Commands
 
@@ -38,21 +37,25 @@ If you need more information on the `pebble` command or a sub-command, append `-
 
 ```
 src/c/           - C source files for the watchapp
-src/pkjs/        - PebbleKitJS files (currently empty)
-worker_src/c/    - Worker source files (optional, not present)
-resources/       - Images, fonts, and other resources (not present)
+src/pkjs/        - PebbleKit JS entry point and Clay settings schema
+resources/fonts/ - Custom vector fonts
+resources/images/ - App icon and alarm image
+build/           - Generated build output; do not edit by hand
 ```
 ## Configuration
 
-By default, this project is initialized as a watchface. To make it an app, replace "watchface": true with "watchface": false in package.json.
+This project is configured as a watchapp (`"watchface": false`) in `package.json`.
+
+The Clay configuration in `src/pkjs/config.js` provides up to three alarm slots. Each slot has an enable toggle, a time, and weekday checkboxes. `src/pkjs/index.js` converts the selected weekdays to a bitmask before sending settings to the watch.
 
 ## Architecture
 
 The application follows the standard Pebble app architecture:
 
-1. **Main Entry Point**: `src/c` - The `main()` function initializes the app and starts the event loop
-2. **Window Management**: Single window app with text layer for displaying button press feedback
-3. **Event Handling**: Button click handlers registered via `prv_click_config_provider` for UP, DOWN, and SELECT buttons
+1. **Main Entry Point**: `src/c/igiwatchalarm.c` - `main()` initializes the app and starts the event loop.
+2. **Window Management**: A single window contains canvas and status layers for the clock, alarm screen, and status indicators.
+3. **Alarm Handling**: Three persisted alarm slots are evaluated against their weekday masks. `schedule_alarm_wakeups()` schedules the next selected occurrence for each active slot.
+4. **Event Handling**: Button handlers dismiss a ringing alarm; BACK exits the app when no alarm is ringing. An accelerometer tap also dismisses a ringing alarm.
 
 ## SDK Documentation
 

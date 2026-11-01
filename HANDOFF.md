@@ -7,10 +7,11 @@
 ### Key Capabilities
 - **Time & Date Display**: Supports custom fonts (Avenir Next, Leco 1976, Avenir Next Regular) rendered via `pebble-fctx`, with orientation settings (Portrait, Landscape Left, Landscape Right) and multilingual date localization (Italian, English, French, German, Spanish).
 - **Status Indicators**: Real-time battery indicator with color coding, Bluetooth connection status, and alarm status icon positioned directly below the battery.
-- **Step Counting & Date Glance**: Triggered by a double-tap/wrist shake or SELECT button to display daily step count and expanded date.
+- **Step Counting & Date Glance**: Triggered by a double-tap to display daily step count and expanded date.
 - **Smart Alarm System**:
-  - Configurable from the Pebble mobile app settings via Clay framework (`AlarmActive`, `AlarmTime`).
-  - Schedules wakeups with Pebble OS `wakeup_schedule()` so alarms fire whether the app is open or closed.
+   - Supports up to three independently enabled alarms. Each slot has a time and a selected set of weekdays, configured in the Pebble mobile app via Clay (`Alarm1Active`/`Alarm1Time`/`Alarm1Days`, through slot 3).
+   - Schedules the next occurrence of each active alarm with Pebble OS `wakeup_schedule()`, so alarms fire whether the app is open or closed. An alarm with no selected days is not scheduled.
+   - Persists each slot's enabled state, time, and weekday mask across app restarts. Existing single-alarm settings are migrated to slot 1 as a daily alarm.
   - Cadence vibration: a distinct "tic" pulse every second, automatically stopping after 15 seconds if unhandled.
   - Dedicated alarm UI: Displays current time at the top, a large ringing alarm clock graphic (`ALARM_LARGE`) in the center, and dismissal hint at the bottom.
   - Interactive dismissal: Pressing any physical button (UP, SELECT, DOWN, BACK) or tapping/shaking the watch immediately stops the alarm.
@@ -74,13 +75,15 @@ In `package.json`:
 > Pebble OS intercepts all hardware button presses on watchfaces (`"watchface": true`), preventing button click handlers from running. By configuring the app as `"watchface": false`, the application can use `window_set_click_config_provider()` to intercept physical button clicks (UP, SELECT, DOWN, BACK) to silence alarms.
 
 ### 4.2 Alarm Subsystem
-1. **Settings Delivery (`src/pkjs/config.js` -> AppMessage)**:
-   - `AlarmActive` (boolean): Enables or disables the alarm.
-   - `AlarmTime` (string): Time in `HH:MM` format.
+1. **Settings Delivery (`src/pkjs/config.js` -> `src/pkjs/index.js` -> AppMessage)**:
+   - Three slots each provide an active boolean, an `HH:MM` time string, and a weekday bitmask (`Alarm1Active`, `Alarm1Time`, `Alarm1Days` through slot 3).
+   - The Clay weekday options are ordered Monday through Sunday. The JavaScript maps these to Pebble `tm_wday` bits: bit 0 is Sunday, followed by Monday through Saturday.
+   - A zero weekday mask leaves the slot enabled in settings but prevents it from being scheduled or triggered.
 2. **Persistence (`persist_write_*` / `persist_read_*`)**:
-   - Alarm state is retained across app restarts in persistent storage using keys `MESSAGE_KEY_AlarmActive` and `MESSAGE_KEY_AlarmTime`.
+   - Each slot's state is retained across app restarts using its corresponding `MESSAGE_KEY_AlarmNActive`, `MESSAGE_KEY_AlarmNTime`, and `MESSAGE_KEY_AlarmNDays` keys.
+   - On upgrade, legacy `AlarmActive` and `AlarmTime` values are copied to slot 1, with all seven days enabled.
 3. **Pebble Wakeup API**:
-   - `schedule_alarm_wakeup()`: Computes the target timestamp. If the time has already passed today, it schedules for tomorrow (+86400s). Cancels older wakeups using `wakeup_cancel_all()` and schedules via `wakeup_schedule(alarm_time, 0, false)`.
+   - `schedule_alarm_wakeups()`: Finds the next selected weekday and time for each active slot. It cancels old app wakeups and schedules up to one next occurrence per slot, using the slot index as the wakeup cookie.
    - `wakeup_service_subscribe()`: Receives wakeup callbacks if the app is already open.
    - `APP_LAUNCH_WAKEUP`: Detects if the app was launched by a scheduled wakeup event when closed and triggers the alarm immediately.
 4. **Trigger & Vibration**:
@@ -119,10 +122,7 @@ pebble emu-button --emulator basalt click back
 ```
 
 ### Send Settings AppMessage (Test Alarm)
-```bash
-# Enable alarm and set time to 10:00
-pebble send-app-message --emulator basalt --int 10005=1 --string 10006=10:00
-```
+Set alarm slots, times, and weekdays through the IgiWatchAlarm configuration page in the Pebble mobile app. The numeric AppMessage key IDs are generated from `package.json` and should not be hard-coded in test commands.
 
 ### Set Emulator Time
 ```bash
