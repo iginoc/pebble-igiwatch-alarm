@@ -324,29 +324,6 @@ static void wakeup_handler(WakeupId id, int32_t cookie) {
   trigger_alarm();
 }
 
-static void button_click_handler(ClickRecognizerRef recognizer, void *context) {
-  if (s_alarm_ringing) {
-    APP_LOG(APP_LOG_LEVEL_INFO, "Tasto premuto: sveglia fermata!");
-    stop_alarm();
-  }
-}
-
-static void back_click_handler(ClickRecognizerRef recognizer, void *context) {
-  if (s_alarm_ringing) {
-    APP_LOG(APP_LOG_LEVEL_INFO, "Tasto indietro premuto: sveglia fermata!");
-    stop_alarm();
-  } else {
-    window_stack_pop(true);
-  }
-}
-
-static void prv_click_config_provider(void *context) {
-  window_single_click_subscribe(BUTTON_ID_UP, button_click_handler);
-  window_single_click_subscribe(BUTTON_ID_SELECT, button_click_handler);
-  window_single_click_subscribe(BUTTON_ID_DOWN, button_click_handler);
-  window_single_click_subscribe(BUTTON_ID_BACK, back_click_handler);
-}
-
 static void tick_handler(struct tm *tick_time, TimeUnits units_changed) {
   update_time();
 
@@ -477,7 +454,7 @@ static void layer_update_proc(Layer *layer, GContext *ctx) {
     #else
     int hint_y = bounds.size.h - 22;
     #endif
-    graphics_draw_text(ctx, "Premi un tasto", hint_font, GRect(0, hint_y, bounds.size.w, 20),
+    graphics_draw_text(ctx, "Tocca orologio", hint_font, GRect(0, hint_y, bounds.size.w, 20),
                        GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
     return;
   }
@@ -887,9 +864,6 @@ void Clock_init(Window *window) {
   // Subscribe to tick timer service
   tick_timer_service_subscribe(MINUTE_UNIT, tick_handler);
   accel_tap_service_subscribe(tap_handler);
-
-  // Set click config provider to receive button clicks (e.g. to stop alarm)
-  window_set_click_config_provider(window, prv_click_config_provider);
 
   // Subscribe to services
   battery_state_service_subscribe(battery_callback);

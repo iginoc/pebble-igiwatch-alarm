@@ -2,7 +2,7 @@
   "capabilities": ["health"],
   "name": "igiwatchalarm",
   "author": "iginoc",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "keywords": [
     "pebble-app"
   ],
@@ -24,7 +24,7 @@
       "emery"
     ],
     "watchapp": {
-      "watchface": false,
+      "watchface": true,
       "iconImage": "MENU_ICON"
     },
     "messageKeys": [

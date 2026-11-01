@@ -2,7 +2,7 @@
 
 ## 1. Project Overview
 
-**IgiWatchAlarm** is a multifunctional Pebble smartwatch application (watchapp) developed in C using the Pebble SDK. It combines a dynamic and configurable clock display with advanced typography, step counting, orientation modes, and an integrated alarm system configurable via smartphone settings.
+**IgiWatchAlarm** is a Pebble watchface developed in C using the Pebble SDK. It combines a dynamic and configurable clock display with advanced typography, step counting, orientation modes, and an integrated alarm system configurable via smartphone settings.
 
 ### Key Capabilities
 - **Time & Date Display**: Supports custom fonts (Avenir Next, Leco 1976, Avenir Next Regular) rendered via `pebble-fctx`, with orientation settings (Portrait, Landscape Left, Landscape Right) and multilingual date localization (Italian, English, French, German, Spanish).
@@ -14,7 +14,7 @@
    - Persists each slot's enabled state, time, and weekday mask across app restarts. Existing single-alarm settings are migrated to slot 1 as a daily alarm.
   - Cadence vibration: a distinct "tic" pulse every second, automatically stopping after 15 seconds if unhandled.
   - Dedicated alarm UI: Displays current time at the top, a large ringing alarm clock graphic (`ALARM_LARGE`) in the center, and dismissal hint at the bottom.
-  - Interactive dismissal: Pressing any physical button (UP, SELECT, DOWN, BACK) or tapping/shaking the watch immediately stops the alarm.
+   - Interactive dismissal: Tapping the watch immediately stops the alarm. Pebble OS intercepts hardware-button input for watchfaces, so the watchface cannot use buttons to dismiss alarms.
   - Auto-timeout: Automatically silences after 15 seconds if not dismissed manually.
 
 ---
@@ -63,16 +63,15 @@ igiwatchalarm/
 
 ## 4. Architecture & Key Subsystems
 
-### 4.1 Watchapp vs Watchface Configuration
+### 4.1 Watchface Configuration
 In `package.json`:
 ```json
 "watchapp": {
-  "watchface": false,
+   "watchface": true,
   "iconImage": "MENU_ICON"
 }
 ```
-> [!IMPORTANT]
-> Pebble OS intercepts all hardware button presses on watchfaces (`"watchface": true`), preventing button click handlers from running. By configuring the app as `"watchface": false`, the application can use `window_set_click_config_provider()` to intercept physical button clicks (UP, SELECT, DOWN, BACK) to silence alarms.
+Pebble OS intercepts hardware-button input for watchfaces. Alarm dismissal is handled by the accelerometer tap service instead; a tap while the alarm is ringing stops it.
 
 ### 4.2 Alarm Subsystem
 1. **Settings Delivery (`src/pkjs/config.js` -> `src/pkjs/index.js` -> AppMessage)**:
@@ -93,10 +92,10 @@ In `package.json`:
    - When `s_alarm_ringing` is true, the canvas switches to the alarm screen:
      - Top: Current time in `FONT_KEY_BITHAM_34_MEDIUM_NUMBERS`.
      - Center: Large 84x84 `ALARM_LARGE` bitmap drawn with `GCompOpSet`.
-     - Bottom: Dismissal instructions ("Premi un tasto").
+   - Bottom: Dismissal instructions ("Tocca orologio").
    - Status bar rendering is suppressed during ringing.
 6. **Dismissal**:
-   - Physical button handlers (`button_click_handler` and `back_click_handler`) or accelerometer tap (`tap_handler`) call `stop_alarm()`.
+   - The accelerometer tap handler (`tap_handler`) calls `stop_alarm()` when the alarm is ringing. Hardware-button handlers are not registered because Pebble OS reserves those inputs for watchfaces.
    - `stop_alarm()` cancels timers, cancels vibration (`vibes_cancel()`), sets `s_alarm_ringing = false`, redraws layers, and reschedules the next wakeup.
 
 ---
@@ -113,15 +112,7 @@ pebble build
 pebble install --emulator basalt
 ```
 
-### Emulate Button Clicks
-```bash
-pebble emu-button --emulator basalt click select
-pebble emu-button --emulator basalt click up
-pebble emu-button --emulator basalt click down
-pebble emu-button --emulator basalt click back
-```
-
-### Send Settings AppMessage (Test Alarm)
+### Configure and Test Alarms
 Set alarm slots, times, and weekdays through the IgiWatchAlarm configuration page in the Pebble mobile app. The numeric AppMessage key IDs are generated from `package.json` and should not be hard-coded in test commands.
 
 ### Set Emulator Time
@@ -140,6 +131,6 @@ pebble screenshot --no-open screenshot.png
 
 - **Build**: Successfully compiles for `aplite`, `basalt`, `chalk`, `diorite`, and `emery` without warnings or errors.
 - **Alarm UI**: Verified via emulator screenshots with proper layout on color and round displays.
-- **Button Dismissal**: Verified on emulator; button clicks dismiss the alarm immediately and restore the normal watch face.
+- **Tap Dismissal**: The accelerometer tap handler dismisses a ringing alarm; hardware-button input is reserved by Pebble OS in watchface mode.
 - **15-Second Timeout**: Verified on emulator; the alarm automatically turns off and returns to normal clock after 15 seconds.
 
