@@ -1,7 +1,7 @@
 module.exports = [
   {
     "type": "heading",
-    "defaultValue": "IgiWatch Configuration"
+    "defaultValue": "IgiWatchAlarm Configuration"
   },
   {
     "type": "section",
@@ -83,6 +83,30 @@ module.exports = [
           { "label": "German", "value": "de_DE" },
           { "label": "Spanish", "value": "es_ES" }
         ]
+      }
+    ]
+  },
+  {
+    "type": "section",
+    "items": [
+      {
+        "type": "heading",
+        "defaultValue": "Alarm"
+      },
+      {
+        "type": "toggle",
+        "messageKey": "AlarmActive",
+        "label": "Enable Alarm",
+        "defaultValue": false
+      },
+      {
+        "type": "input",
+        "messageKey": "AlarmTime",
+        "defaultValue": "07:00",
+        "label": "Alarm Time",
+        "attributes": {
+          "type": "time"
+        }
       }
     ]
   },

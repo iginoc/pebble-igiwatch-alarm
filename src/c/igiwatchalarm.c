@@ -1,4 +1,4 @@
-#include "igiwatch.h"
+#include "igiwatchalarm.h"
 #include <pebble.h>
 #include <pebble-fctx/fctx.h>
 #include <pebble-fctx/ffont.h>
@@ -18,6 +18,18 @@ static GColor s_text_color;
 static int s_font_choice;
 static int s_orientation_choice;
 static char s_date_locale[8];
+
+// Alarm state
+static bool s_alarm_active = false;
+static char s_alarm_time[8] = "07:00";
+static int s_alarm_hour = 7;
+static int s_alarm_min = 0;
+static bool s_alarm_triggered_this_minute = false;
+static bool s_alarm_ringing = false;
+static AppTimer *s_alarm_vibe_timer = NULL;
+static AppTimer *s_alarm_timeout_timer = NULL;
+static GBitmap *s_alarm_bitmap = NULL;
+static WakeupId s_alarm_wakeup_id = -1;
 
 static AppTimer *s_fluid_rotation_timer;
 static AppTimer *s_double_tap_timer = NULL;
@@ -126,8 +138,182 @@ static void update_time() {
   layer_mark_dirty(s_canvas_layer);
 }
 
+static bool tuple_get_bool(Tuple *t) {
+  if (!t) return false;
+  if (t->length == 1) return t->value->uint8 != 0;
+  if (t->length == 2) return t->value->uint16 != 0;
+  if (t->length == 4) return t->value->uint32 != 0;
+  return false;
+}
+
+static void parse_alarm_time(const char *time_str) {
+  s_alarm_hour = -1;
+  s_alarm_min = -1;
+  if (!time_str) {
+    return;
+  }
+  while (*time_str == ' ') time_str++;
+  const char *colon = time_str;
+  while (*colon && *colon != ':') {
+    colon++;
+  }
+  if (*colon == ':') {
+    int h = atoi(time_str);
+    int m = atoi(colon + 1);
+    const char *suffix = colon + 1;
+    while (*suffix >= '0' && *suffix <= '9') suffix++;
+    while (*suffix == ' ') suffix++;
+    if ((*suffix == 'p' || *suffix == 'P') && h < 12) {
+      h += 12;
+    } else if ((*suffix == 'a' || *suffix == 'A') && h == 12) {
+      h = 0;
+    }
+    if (h >= 0 && h < 24 && m >= 0 && m < 60) {
+      s_alarm_hour = h;
+      s_alarm_min = m;
+    }
+  }
+  APP_LOG(APP_LOG_LEVEL_INFO, "Orario sveglia analizzato: %02d:%02d", s_alarm_hour, s_alarm_min);
+}
+
+static void schedule_alarm_wakeup(void) {
+  wakeup_cancel_all();
+  s_alarm_wakeup_id = -1;
+
+  if (!s_alarm_active || s_alarm_hour < 0 || s_alarm_min < 0) {
+    return;
+  }
+
+  time_t now = time(NULL);
+  struct tm *t = localtime(&now);
+
+  struct tm alarm_tm = *t;
+  alarm_tm.tm_hour = s_alarm_hour;
+  alarm_tm.tm_min = s_alarm_min;
+  alarm_tm.tm_sec = 0;
+
+  time_t alarm_time = mktime(&alarm_tm);
+  if (alarm_time <= now) {
+    alarm_time += 86400; // Programma per il giorno successivo
+  }
+
+  s_alarm_wakeup_id = wakeup_schedule(alarm_time, 0, false);
+  if (s_alarm_wakeup_id < 0) {
+    APP_LOG(APP_LOG_LEVEL_WARNING, "Errore programmazione wakeup: %ld", (long)s_alarm_wakeup_id);
+  } else {
+    APP_LOG(APP_LOG_LEVEL_INFO, "Wakeup programmato con successo per timestamp: %ld (ID: %ld)", (long)alarm_time, (long)s_alarm_wakeup_id);
+  }
+}
+
+static const uint32_t s_alarm_vibe_segments[] = {
+  350, 150, 350, 150, 350, 150, 500
+};
+static const VibePattern s_alarm_vibe_pattern = {
+  .durations = (uint32_t *)s_alarm_vibe_segments,
+  .num_segments = ARRAY_LENGTH(s_alarm_vibe_segments),
+};
+
+static void stop_alarm(void) {
+  if (s_alarm_vibe_timer) {
+    app_timer_cancel(s_alarm_vibe_timer);
+    s_alarm_vibe_timer = NULL;
+  }
+  if (s_alarm_timeout_timer) {
+    app_timer_cancel(s_alarm_timeout_timer);
+    s_alarm_timeout_timer = NULL;
+  }
+  vibes_cancel();
+
+  if (s_alarm_ringing) {
+    s_alarm_ringing = false;
+    APP_LOG(APP_LOG_LEVEL_INFO, "Sveglia fermata.");
+    if (s_canvas_layer) {
+      layer_mark_dirty(s_canvas_layer);
+    }
+    if (s_status_layer) {
+      layer_mark_dirty(s_status_layer);
+    }
+    schedule_alarm_wakeup();
+  }
+}
+
+static void alarm_timeout_callback(void *data) {
+  s_alarm_timeout_timer = NULL;
+  APP_LOG(APP_LOG_LEVEL_INFO, "15 secondi trascorsi: sveglia silenziata automaticamente.");
+  stop_alarm();
+}
+
+static void alarm_vibe_timer_callback(void *data) {
+  s_alarm_vibe_timer = NULL;
+  if (s_alarm_ringing) {
+    vibes_enqueue_custom_pattern(s_alarm_vibe_pattern);
+    s_alarm_vibe_timer = app_timer_register(2000, alarm_vibe_timer_callback, NULL);
+  }
+}
+
+static void trigger_alarm(void) {
+  if (s_alarm_ringing) {
+    return;
+  }
+  APP_LOG(APP_LOG_LEVEL_INFO, "SVEGLIA ATTIVATA! Mostro ora e immagine, vibrazione avviata (max 15s).");
+  s_alarm_ringing = true;
+
+  if (s_canvas_layer) {
+    layer_mark_dirty(s_canvas_layer);
+  }
+  if (s_status_layer) {
+    layer_mark_dirty(s_status_layer);
+  }
+
+  // Vibrazione immediata e ripetizione ogni 2 secondi
+  vibes_enqueue_custom_pattern(s_alarm_vibe_pattern);
+  s_alarm_vibe_timer = app_timer_register(2000, alarm_vibe_timer_callback, NULL);
+
+  // Auto-stop dopo 15 secondi esatti se non premuto alcun tasto
+  s_alarm_timeout_timer = app_timer_register(15000, alarm_timeout_callback, NULL);
+}
+
+static void wakeup_handler(WakeupId id, int32_t cookie) {
+  APP_LOG(APP_LOG_LEVEL_INFO, "Evento Wakeup scattato! ID: %ld", (long)id);
+  trigger_alarm();
+}
+
+static void button_click_handler(ClickRecognizerRef recognizer, void *context) {
+  if (s_alarm_ringing) {
+    APP_LOG(APP_LOG_LEVEL_INFO, "Tasto premuto: sveglia fermata!");
+    stop_alarm();
+  }
+}
+
+static void back_click_handler(ClickRecognizerRef recognizer, void *context) {
+  if (s_alarm_ringing) {
+    APP_LOG(APP_LOG_LEVEL_INFO, "Tasto indietro premuto: sveglia fermata!");
+    stop_alarm();
+  } else {
+    window_stack_pop(true);
+  }
+}
+
+static void prv_click_config_provider(void *context) {
+  window_single_click_subscribe(BUTTON_ID_UP, button_click_handler);
+  window_single_click_subscribe(BUTTON_ID_SELECT, button_click_handler);
+  window_single_click_subscribe(BUTTON_ID_DOWN, button_click_handler);
+  window_single_click_subscribe(BUTTON_ID_BACK, back_click_handler);
+}
+
 static void tick_handler(struct tm *tick_time, TimeUnits units_changed) {
   update_time();
+
+  if (s_alarm_active && s_alarm_hour >= 0 && s_alarm_min >= 0) {
+    if (tick_time->tm_hour == s_alarm_hour && tick_time->tm_min == s_alarm_min) {
+      if (!s_alarm_triggered_this_minute) {
+        s_alarm_triggered_this_minute = true;
+        trigger_alarm();
+      }
+    } else {
+      s_alarm_triggered_this_minute = false;
+    }
+  }
 }
 
 static void fluid_rotation_timer_callback(void *data) {
@@ -145,6 +331,12 @@ static void double_tap_timer_callback(void *data) {
 }
 
 static void tap_handler(AccelAxisType axis, int32_t direction) {
+  if (s_alarm_ringing) {
+    APP_LOG(APP_LOG_LEVEL_INFO, "Sveglia silenziata con tocco.");
+    stop_alarm();
+    return;
+  }
+  vibes_cancel();
   APP_LOG(APP_LOG_LEVEL_DEBUG, "Tocco rilevato! Asse: %d", (int)axis);
 
   s_tap_count++;
@@ -165,8 +357,6 @@ static void tap_handler(AccelAxisType axis, int32_t direction) {
   // Get step count
   #if defined(PBL_HEALTH)
   HealthMetric metric = HealthMetricStepCount;
-  time_t start = time_start_of_today();
-  time_t end = time(NULL);
   int steps = (int)health_service_sum_today(metric);
   APP_LOG(APP_LOG_LEVEL_INFO, "PBL_HEALTH defined. Steps: %d", steps);
   snprintf(s_steps_str, sizeof(s_steps_str), "%d", steps);
@@ -194,6 +384,50 @@ static void layer_update_proc(Layer *layer, GContext *ctx) {
   // Draw a background rectangle
   graphics_context_set_fill_color(ctx, s_bg_color);
   graphics_fill_rect(ctx, bounds, 0, GCornerNone);
+
+  if (s_alarm_ringing) {
+    graphics_context_set_text_color(ctx, s_text_color);
+
+    #if defined(PBL_ROUND)
+    int time_y = 12;
+    #else
+    int time_y = 4;
+    #endif
+
+    // Mostra in alto l'ora attuale
+    GFont time_font = fonts_get_system_font(FONT_KEY_BITHAM_34_MEDIUM_NUMBERS);
+    GRect time_rect = GRect(0, time_y, bounds.size.w, 38);
+    graphics_draw_text(ctx, s_time_str, time_font, time_rect, 
+                       GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+
+    // Mostra la grande immagine
+    if (!s_alarm_bitmap) {
+      s_alarm_bitmap = gbitmap_create_with_resource(RESOURCE_ID_ALARM_LARGE);
+    }
+    if (s_alarm_bitmap) {
+      GRect bmp_bounds = gbitmap_get_bounds(s_alarm_bitmap);
+      int bmp_w = bmp_bounds.size.w;
+      int bmp_h = bmp_bounds.size.h;
+      int bmp_x = (bounds.size.w - bmp_w) / 2;
+      int bmp_y = time_y + 40 + (bounds.size.h - (time_y + 40) - bmp_h - 22) / 2;
+      if (bmp_y < time_y + 38) {
+        bmp_y = time_y + 38;
+      }
+      graphics_context_set_compositing_mode(ctx, GCompOpSet);
+      graphics_draw_bitmap_in_rect(ctx, s_alarm_bitmap, GRect(bmp_x, bmp_y, bmp_w, bmp_h));
+    }
+
+    // Mostra indicazione per fermare la sveglia
+    GFont hint_font = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
+    #if defined(PBL_ROUND)
+    int hint_y = bounds.size.h - 26;
+    #else
+    int hint_y = bounds.size.h - 22;
+    #endif
+    graphics_draw_text(ctx, "Premi un tasto", hint_font, GRect(0, hint_y, bounds.size.w, 20),
+                       GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+    return;
+  }
 
   GPoint center = grect_center_point(&bounds);
 
@@ -246,6 +480,16 @@ static void layer_update_proc(Layer *layer, GContext *ctx) {
     graphics_draw_text(ctx, label_steps, label_font, GRect(0, center.y - 12, bounds.size.w, 34), 
                        GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
     graphics_draw_text(ctx, label_today, label_font, GRect(0, center.y + 26, bounds.size.w, 34), 
+                       GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+
+    char alarm_info[32];
+    if (s_alarm_active && s_alarm_hour >= 0 && s_alarm_min >= 0) {
+      snprintf(alarm_info, sizeof(alarm_info), "Sveglia: %02d:%02d", s_alarm_hour, s_alarm_min);
+    } else {
+      snprintf(alarm_info, sizeof(alarm_info), "Sveglia: OFF");
+    }
+    GFont info_font = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
+    graphics_draw_text(ctx, alarm_info, info_font, GRect(0, bounds.size.h - 22, bounds.size.w, 20),
                        GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
   }
 
@@ -352,8 +596,8 @@ static void layer_update_proc(Layer *layer, GContext *ctx) {
 static void status_update_proc(Layer *layer, GContext *ctx) {
   GRect bounds = layer_get_bounds(layer);
 
-  // Don't draw status icons while the orientation is being changed
-  if (s_is_moving) {
+  // Don't draw status icons while orientation is being changed or alarm is ringing
+  if (s_is_moving || s_alarm_ringing) {
     return;
   }
 
@@ -429,6 +673,31 @@ static void status_update_proc(Layer *layer, GContext *ctx) {
     graphics_draw_line(ctx, p_mid_left, p_mid_right);
 
   }
+
+  if (s_alarm_active) {
+    GPoint clock_center;
+    if (s_current_angle == TRIG_MAX_ANGLE * 3 / 4) { // Landscape Sinistro
+      clock_center = GPoint(battery_rect.origin.x - 14, battery_rect.origin.y + battery_rect.size.h / 2);
+    } else if (s_current_angle == TRIG_MAX_ANGLE / 4) { // Landscape Destro
+      clock_center = GPoint(battery_rect.origin.x + battery_rect.size.w + 14, battery_rect.origin.y + battery_rect.size.h / 2);
+    } else { // Portrait - posizionata direttamente sotto la batteria
+      clock_center = GPoint(battery_rect.origin.x + battery_rect.size.w / 2, 
+                            battery_rect.origin.y + battery_rect.size.h + 10);
+    }
+
+    // Disegna icona sveglia stilizzata
+    graphics_context_set_stroke_color(ctx, s_text_color);
+    graphics_context_set_fill_color(ctx, s_text_color);
+    graphics_draw_circle(ctx, clock_center, 5);
+    graphics_draw_line(ctx, clock_center, GPoint(clock_center.x, clock_center.y - 3));
+    graphics_draw_line(ctx, clock_center, GPoint(clock_center.x + 3, clock_center.y));
+    // Campanelli in alto
+    graphics_draw_pixel(ctx, GPoint(clock_center.x - 4, clock_center.y - 5));
+    graphics_draw_pixel(ctx, GPoint(clock_center.x + 4, clock_center.y - 5));
+    // Piedini in basso
+    graphics_draw_pixel(ctx, GPoint(clock_center.x - 4, clock_center.y + 5));
+    graphics_draw_pixel(ctx, GPoint(clock_center.x + 4, clock_center.y + 5));
+  }
 }
 
 static void battery_callback(BatteryChargeState charge) {
@@ -495,6 +764,28 @@ static void inbox_received_handler(DictionaryIterator *iter, void *context) {
     update_time();
   }
 
+  Tuple *alarm_active_t = dict_find(iter, MESSAGE_KEY_AlarmActive);
+  if (alarm_active_t) {
+    s_alarm_active = tuple_get_bool(alarm_active_t);
+    persist_write_bool(MESSAGE_KEY_AlarmActive, s_alarm_active);
+    APP_LOG(APP_LOG_LEVEL_INFO, "Ricevuto AlarmActive: %d (len=%d)", s_alarm_active, (int)alarm_active_t->length);
+  }
+
+  Tuple *alarm_time_t = dict_find(iter, MESSAGE_KEY_AlarmTime);
+  if (alarm_time_t) {
+    strncpy(s_alarm_time, alarm_time_t->value->cstring, sizeof(s_alarm_time) - 1);
+    s_alarm_time[sizeof(s_alarm_time) - 1] = '\0';
+    persist_write_string(MESSAGE_KEY_AlarmTime, s_alarm_time);
+    parse_alarm_time(s_alarm_time);
+    APP_LOG(APP_LOG_LEVEL_INFO, "Ricevuto AlarmTime: %s", s_alarm_time);
+  }
+
+  if (alarm_active_t || alarm_time_t) {
+    schedule_alarm_wakeup();
+    vibes_short_pulse();
+    layer_mark_dirty(s_status_layer);
+  }
+
   layer_mark_dirty(s_canvas_layer);
 }
 
@@ -517,6 +808,9 @@ void Clock_init(Window *window) {
   tick_timer_service_subscribe(MINUTE_UNIT, tick_handler);
   accel_tap_service_subscribe(tap_handler);
 
+  // Set click config provider to receive button clicks (e.g. to stop alarm)
+  window_set_click_config_provider(window, prv_click_config_provider);
+
   // Subscribe to services
   battery_state_service_subscribe(battery_callback);
   bluetooth_connection_service_subscribe(bluetooth_callback);
@@ -530,6 +824,7 @@ void Clock_init(Window *window) {
 
 // Deinitialize clock
 void Clock_deinit(void) {
+  stop_alarm();
   battery_state_service_unsubscribe();
   bluetooth_connection_service_unsubscribe();
   accel_tap_service_unsubscribe();
@@ -557,6 +852,11 @@ void Clock_deinit(void) {
   if (s_status_layer) {
     layer_destroy(s_status_layer);
     s_status_layer = NULL;
+  }
+
+  if (s_alarm_bitmap) {
+    gbitmap_destroy(s_alarm_bitmap);
+    s_alarm_bitmap = NULL;
   }
 }
 
@@ -601,6 +901,21 @@ static void init(void) {
     strcpy(s_date_locale, "it_IT");
   }
 
+  // Load alarm settings or set defaults
+  if (persist_exists(MESSAGE_KEY_AlarmActive)) {
+    s_alarm_active = persist_read_bool(MESSAGE_KEY_AlarmActive);
+  } else {
+    s_alarm_active = false;
+  }
+
+  if (persist_exists(MESSAGE_KEY_AlarmTime)) {
+    persist_read_string(MESSAGE_KEY_AlarmTime, s_alarm_time, sizeof(s_alarm_time));
+  } else {
+    strcpy(s_alarm_time, "07:00");
+  }
+  parse_alarm_time(s_alarm_time);
+  schedule_alarm_wakeup();
+
   if (s_orientation_choice == 1) { // Portrait
     s_current_angle = TRIG_MAX_ANGLE / 2;
   } else if (s_orientation_choice == 2) { // Landscape Left
@@ -610,7 +925,7 @@ static void init(void) {
   }
 
   app_message_register_inbox_received(inbox_received_handler);
-  app_message_open(128, 128);
+  app_message_open(app_message_inbox_size_maximum(), app_message_outbox_size_maximum());
 
   s_main_window = window_create();
   window_set_window_handlers(
@@ -618,6 +933,16 @@ static void init(void) {
       (WindowHandlers){.load = main_window_load, .unload = main_window_unload});
   window_set_background_color(s_main_window, GColorBlack);
   window_stack_push(s_main_window, true);
+
+  wakeup_service_subscribe(wakeup_handler);
+  if (launch_reason() == APP_LAUNCH_WAKEUP) {
+    WakeupId id;
+    int32_t reason;
+    if (wakeup_get_launch_event(&id, &reason)) {
+      APP_LOG(APP_LOG_LEVEL_INFO, "Avvio da sveglia programmata! ID: %ld", (long)id);
+    }
+    trigger_alarm();
+  }
 }
 
 static void deinit(void) { window_destroy(s_main_window); }

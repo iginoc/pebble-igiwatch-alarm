@@ -2,7 +2,7 @@
   "capabilities": ["health"],
   "name": "igiwatchalarm",
   "author": "iginoc",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "keywords": [
     "pebble-app"
   ],
@@ -24,7 +24,7 @@
       "emery"
     ],
     "watchapp": {
-      "watchface": true,
+      "watchface": false,
       "iconImage": "MENU_ICON"
     },
     "messageKeys": [
@@ -32,15 +32,22 @@
       "TextColor",
       "FontChoice",
       "ScreenOrientation",
-      "DateLanguage"
+      "DateLanguage",
+      "AlarmActive",
+      "AlarmTime"
     ],
     "resources": {
       "media": [
         {
           "type": "bitmap",
           "name": "MENU_ICON",
-          "file": "images/igiwatch.png",
+          "file": "images/menu_icon.png",
           "menuIcon": true
+        },
+        {
+          "type": "bitmap",
+          "name": "ALARM_LARGE",
+          "file": "images/alarm_large.png"
         },
         {
           "type": "raw",
